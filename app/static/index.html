@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planeador TransMilenio</title>
+<style>
+  :root { --rojo:#c8102e; --gris:#f3f3f3; --borde:#ddd; --texto:#222; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; color:var(--texto); background:#fff; }
+  header { background:var(--rojo); color:#fff; padding:14px 20px; }
+  header h1 { margin:0; font-size:1.3rem; }
+  nav { display:flex; flex-wrap:wrap; gap:4px; padding:8px 16px; background:var(--gris); border-bottom:1px solid var(--borde); }
+  nav button { border:0; background:none; padding:8px 12px; border-radius:6px; cursor:pointer; font-size:.95rem; }
+  nav button.activa { background:var(--rojo); color:#fff; }
+  main { max-width:900px; margin:0 auto; padding:16px; }
+  section { display:none; } section.activa { display:block; }
+  label { display:block; margin:10px 0 4px; font-weight:600; font-size:.9rem; }
+  input, select { padding:8px; font-size:1rem; border:1px solid var(--borde); border-radius:6px; width:100%; max-width:360px; }
+  button.accion { margin-top:12px; padding:9px 16px; background:var(--rojo); color:#fff; border:0; border-radius:6px; cursor:pointer; font-size:.95rem; }
+  button.sec { background:#555; }
+  .fila { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+  .fila > div { flex:1 1 200px; }
+  .resultado { margin-top:14px; padding:12px; background:var(--gris); border-radius:8px; white-space:pre-wrap; }
+  ul.sugerencias { list-style:none; padding:0; margin:4px 0; max-width:360px; border:1px solid var(--borde); border-radius:6px; }
+  ul.sugerencias li { padding:6px 10px; cursor:pointer; } ul.sugerencias li:hover { background:var(--gris); }
+  table { border-collapse:collapse; margin-top:10px; } td, th { border:1px solid var(--borde); padding:5px 10px; text-align:left; }
+  .graficas { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:14px; margin-top:14px; }
+  .grafica { border:1px solid var(--borde); border-radius:8px; padding:8px; }
+  .grafica h4 { margin:0 0 4px; font-size:.9rem; }
+  .leyenda { font-size:.8rem; color:#555; }
+</style>
+</head>
+<body>
+<header><h1>Planeador TransMilenio</h1></header>
+<nav id="pestanas"></nav>
+<main>
+
+<section id="buscar">
+  <h2>Buscar una estación (R1 y R2)</h2>
+  <label for="b-nombre">Nombre</label>
+  <input id="b-nombre" autocomplete="off" placeholder="Ej: CALLE 26">
+  <ul class="sugerencias" id="b-sug" hidden></ul>
+  <button class="accion" onclick="buscar()">Consultar</button>
+  <div class="resultado" id="b-res">Escribe para ver sugerencias.</div>
+</section>
+
+<section id="rango">
+  <h2>Estaciones en un rango (R3)</h2>
+  <div class="fila">
+    <div><label>Desde</label><input id="r-desde" value="CALLE 26"></div>
+    <div><label>Hasta</label><input id="r-hasta" value="CALLE 80"></div>
+  </div>
+  <button class="accion" onclick="rango()">Listar</button>
+  <div class="resultado" id="r-res"></div>
+</section>
+
+<section id="bus">
+  <h2>Próximo bus (R4)</h2>
+  <div class="fila">
+    <div><label>Estación</label><input id="p-est" value="CALLE 26" onchange="cargarRutas()"></div>
+    <div><label>Ruta</label><select id="p-ruta"></select></div>
+    <div><label>Hora</label><input id="p-hora" type="time" value="07:00"></div>
+  </div>
+  <button class="accion" onclick="proximo()">Consultar</button>
+  <div class="resultado" id="p-res"></div>
+</section>
+
+<section id="viaje">
+  <h2>Planear un viaje (R5)</h2>
+  <div class="fila">
+    <div><label>Origen</label><input id="v-origen" value="PORTAL NORTE"></div>
+    <div><label>Destino</label><input id="v-destino" value="PORTAL SUR"></div>
+  </div>
+  <button class="accion" onclick="viaje()">Planear</button>
+  <div class="resultado" id="v-res"></div>
+</section>
+
+<section id="ranking">
+  <h2>Estaciones con más buses al día (R6)</h2>
+  <label>¿Cuántas?</label><input id="k-k" type="number" value="10" min="1">
+  <button class="accion" onclick="ranking()">Ver ranking</button>
+  <div id="k-res"></div>
+</section>
+
+<section id="operar">
+  <h2>Operar la red (R7, R8 y R9)</h2>
+  <h3>Recorrido de una ruta</h3>
+  <div class="fila">
+    <div><label>Ruta</label><select id="o-ruta"></select></div>
+  </div>
+  <button class="accion" onclick="recorrido(false)">Ver ida</button>
+  <button class="accion sec" onclick="recorrido(true)">Ver al revés</button>
+  <h3>Editar la ruta</h3>
+  <div class="fila">
+    <div><label>Estación</label><input id="o-est" placeholder="Ej: CALLE 26"></div>
+    <div><label>Después de (vacío = al inicio)</label><input id="o-despues"></div>
+  </div>
+  <button class="accion" onclick="agregar()">Agregar parada</button>
+  <button class="accion sec" onclick="quitar()">Quitar parada</button>
+  <h3>Cerrar o reabrir una estación</h3>
+  <input id="o-cerrar" placeholder="Ej: RICAURTE">
+  <div>
+    <button class="accion" onclick="cambio('cerrar')">Cerrar</button>
+    <button class="accion sec" onclick="cambio('reabrir')">Reabrir</button>
+  </div>
+  <h3>Historial</h3>
+  <button class="accion sec" onclick="historial('deshacer')">Deshacer</button>
+  <button class="accion sec" onclick="historial('rehacer')">Rehacer</button>
+  <div class="resultado" id="o-res"></div>
+</section>
+
+<section id="fila">
+  <h2>Fila de abordaje en hora pico (R10)</h2>
+  <div class="fila">
+    <div><label>Pasajeros a simular</label><input id="f-n" type="number" value="20000"></div>
+    <div><label>Minutos de llegada (0 a ...)</label><input id="f-min" type="number" value="120"></div>
+    <div><label>Un bus cada (min)</label><input id="f-frec" type="number" value="1"></div>
+    <div><label>Cupo por bus</label><input id="f-cap" type="number" value="160"></div>
+  </div>
+  <button class="accion" onclick="fila()">Simular</button>
+  <div class="resultado" id="f-res">Las llegadas se generan al azar.</div>
+</section>
+
+<section id="rendimiento">
+  <h2>Panel de rendimiento (R11)</h2>
+  <p>Corre cada operación con redes de 1.000, 2.000, 4.000 y 8.000 estaciones.
+     La línea roja es lo medido y la gris punteada es la complejidad esperada,
+     escalada al primer punto. Tarda unos segundos.</p>
+  <button class="accion" onclick="rendimiento()">Medir</button>
+  <div class="resultado" id="m-estado" hidden></div>
+  <div class="graficas" id="m-graficas"></div>
+</section>
+
+</main>
+<script>
+const PESTANAS = [["buscar","Buscar"],["rango","Rango"],["bus","Próximo bus"],["viaje","Viaje"],
+  ["ranking","Ranking"],["operar","Operar"],["fila","Fila"],["rendimiento","Rendimiento"]];
+const $ = id => document.getElementById(id);
+
+function mostrar(id) {
+  document.querySelectorAll("section").forEach(s => s.classList.toggle("activa", s.id === id));
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("activa", b.dataset.id === id));
+}
+PESTANAS.forEach(([id, texto]) => {
+  const b = document.createElement("button");
+  b.textContent = texto; b.dataset.id = id; b.onclick = () => mostrar(id);
+  $("pestanas").appendChild(b);
+});
+mostrar("buscar");
+
+async function api(accion, params = {}) {
+  const r = await fetch("/api/" + accion + "?" + new URLSearchParams(params));
+  const datos = await r.json();
+  if (!r.ok) throw new Error(datos.error);
+  return datos;
+}
+
+// R1 y R2
+$("b-nombre").addEventListener("input", async () => {
+  const texto = $("b-nombre").value;
+  const lista = $("b-sug");
+  lista.innerHTML = "";
+  if (!texto) { lista.hidden = true; return; }
+  const sugerencias = await api("autocompletar", {prefijo: texto, k: 8});
+  sugerencias.forEach(nombre => {
+    const li = document.createElement("li");
+    li.textContent = nombre;
+    li.onclick = () => { $("b-nombre").value = nombre; lista.hidden = true; buscar(); };
+    lista.appendChild(li);
+  });
+  lista.hidden = sugerencias.length === 0;
+});
+async function buscar() {
+  const nombre = $("b-nombre").value;
+  const e = await api("estado", {nombre});
+  if (!e.existe) { $("b-res").textContent = nombre + " no existe."; return; }
+  let texto = nombre.toUpperCase() + (e.abierta ? " está abierta." : " está cerrada.");
+  const rutas = await api("rutas_de", {estacion: nombre});
+  texto += "\nRutas que paran aquí: " + (rutas.join(", ") || "ninguna");
+  $("b-res").textContent = texto;
+}
+
+// R3
+async function rango() {
+  const r = await api("rango", {desde: $("r-desde").value, hasta: $("r-hasta").value});
+  $("r-res").textContent = r.length ? r.length + " estaciones:\n" + r.join("\n") : "Ninguna.";
+}
+
+// R4
+async function cargarRutas() {
+  const rutas = await api("rutas_de", {estacion: $("p-est").value});
+  $("p-ruta").innerHTML = rutas.map(r => `<option>${r}</option>`).join("");
+}
+async function proximo() {
+  const h = await api("proximo_bus", {estacion: $("p-est").value, ruta: $("p-ruta").value, hora: $("p-hora").value});
+  $("p-res").textContent = h ? "El próximo bus pasa a las " + h + "." : "No hay más buses de esa ruta hoy (o la estación está cerrada).";
+}
+
+// R5
+async function viaje() {
+  const tramos = await api("viaje", {origen: $("v-origen").value, destino: $("v-destino").value});
+  if (tramos === null) { $("v-res").textContent = "No hay viaje directo ni con un solo transbordo."; return; }
+  if (tramos.length === 0) { $("v-res").textContent = "Ya estás en el destino."; return; }
+  const total = tramos.reduce((s, t) => s + t.paradas, 0);
+  let texto = tramos.length === 1 ? "Viaje directo" : "Viaje con un transbordo";
+  texto += ` (${total} paradas):\n`;
+  tramos.forEach((t, i) => {
+    texto += `${i + 1}. Toma la ruta ${t.ruta} en ${t.sube} y bájate en ${t.baja} (${t.paradas} paradas).\n`;
+  });
+  $("v-res").textContent = texto;
+}
+
+// R6
+async function ranking() {
+  const r = await api("ranking", {k: $("k-k").value});
+  $("k-res").innerHTML = "<table><tr><th>#</th><th>Estación</th><th>Buses al día</th></tr>" +
+    r.map((e, i) => `<tr><td>${i + 1}</td><td>${e.nombre}</td><td>${e.buses}</td></tr>`).join("") + "</table>";
+}
+
+// R7, R8 y R9
+async function cargarTodasRutas() {
+  const rutas = await api("rutas");
+  $("o-ruta").innerHTML = rutas.map(r => `<option>${r}</option>`).join("");
+}
+async function recorrido(alReves) {
+  const r = await api("recorrido", {ruta: $("o-ruta").value, al_reves: alReves ? "1" : "0"});
+  $("o-res").textContent = $("o-ruta").value + (alReves ? " (al revés)" : "") + ":\n" + r.join(" → ");
+}
+async function agregar() {
+  const ok = await api("agregar_parada", {ruta: $("o-ruta").value, nueva: $("o-est").value, despues_de: $("o-despues").value});
+  ok ? recorrido(false) : ($("o-res").textContent = "No se pudo agregar (¿ya está en la ruta o no existe?).");
+}
+async function quitar() {
+  const ok = await api("quitar_parada", {ruta: $("o-ruta").value, estacion: $("o-est").value});
+  ok ? recorrido(false) : ($("o-res").textContent = "Esa estación no está en la ruta.");
+}
+async function cambio(accion) {
+  const ok = await api(accion, {nombre: $("o-cerrar").value});
+  $("o-res").textContent = ok ? "Listo: " + accion + " " + $("o-cerrar").value.toUpperCase()
+                              : "No se pudo (¿no existe o ya estaba así?).";
+}
+async function historial(accion) {
+  const ok = await api(accion);
+  $("o-res").textContent = ok ? (accion === "deshacer" ? "Se deshizo el último cambio." : "Se rehízo el cambio.")
+                              : "No hay nada para " + accion + ".";
+}
+
+// R10
+async function fila() {
+  const n = +$("f-n").value, minutos = +$("f-min").value;
+  $("f-res").textContent = "Simulando...";
+  const r = await api("fila", {n, minutos, frecuencia: $("f-frec").value, capacidad: $("f-cap").value});
+  $("f-res").textContent = `${r.pasajeros} pasajeros.\nEspera promedio: ${r.espera_promedio.toFixed(1)} min.\n` +
+                           `Espera máxima: ${r.espera_maxima} min.`;
+}
+
+// R11
+async function rendimiento() {
+  $("m-estado").hidden = false;
+  $("m-estado").textContent = "Midiendo...";
+  $("m-graficas").innerHTML = "";
+  const datos = await api("rendimiento");
+  $("m-estado").hidden = true;
+  for (const [op, d] of Object.entries(datos)) {
+    const div = document.createElement("div");
+    div.className = "grafica";
+    const razon = (d.tiempos[d.tiempos.length - 1] / d.tiempos[0]).toFixed(2);
+    div.innerHTML = `<h4>${op}</h4><div class="leyenda">Esperado ${d.esperado}. ` +
+      `De n=${d.n[0]} a n=${d.n[d.n.length - 1]} el tiempo cambió x${razon}.</div>` + grafica(d);
+    $("m-graficas").appendChild(div);
+  }
+}
+function grafica(d) {
+  const W = 240, H = 140, m = 30;
+  const maxY = Math.max(...d.tiempos, ...d.teorico) * 1.1;
+  const x = i => m + i * (W - m - 20) / (d.n.length - 1);
+  const y = v => H - m + 10 - v / maxY * (H - m);
+  const linea = vals => vals.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+  const etiquetas = d.n.map((n, i) => `<text x="${x(i)}" y="${H - 2}" font-size="9" text-anchor="middle">${n}</text>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%">
+    <line x1="${m}" y1="${y(0)}" x2="${W - 20}" y2="${y(0)}" stroke="#999"/>
+    <line x1="${m}" y1="${y(0)}" x2="${m}" y2="10" stroke="#999"/>
+    <text x="2" y="14" font-size="9">${maxY.toFixed(1)} µs</text>
+    <polyline points="${linea(d.teorico)}" fill="none" stroke="#888" stroke-dasharray="4 3" stroke-width="2"/>
+    <polyline points="${linea(d.tiempos)}" fill="none" stroke="#c8102e" stroke-width="2"/>
+    ${d.tiempos.map((v, i) => `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="#c8102e"/>`).join("")}
+    ${etiquetas}</svg>`;
+}
+
+cargarRutas();
+cargarTodasRutas();
+</script>
+</body>
+</html>
