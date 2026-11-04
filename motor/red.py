@@ -1,456 +1,455 @@
-"""La clase Red: toda la lógica del planeador (R1 a R9).
-
-Estructuras que usa (todas implementadas en motor/):
-- self._estaciones : TablaHash  nombre -> Estacion          (R1, R8)
-- self._abiertas   : ArbolAVL   con los nombres abiertos      (R2, R3)
-- self._rutas      : TablaHash  ruta -> Ruta                  (R5, R7)
-     cada Ruta tiene una ListaDoble de paradas y una TablaHash
-     estacion -> nodo para llegar a una parada en O(1).
-- self._horarios   : TablaHash  "ruta|estacion" -> lista ordenada de minutos (R4)
-- self._ranking    : lista ya ordenada que se reconstruye solo si algo cambió (R6)
-- self._pila_deshacer, self._pila_rehacer : Pila             (R9)
-"""
+# La clase Red tiene toda la lógica del planeador (R1 a R9).
+# simular_fila (R10) está al final, como una función suelta.
+#
+# Qué guardamos:
+#   self.abierta    TablaHash  estación -> True (abierta) o False (cerrada)
+#   self.nombres    lista de todas las estaciones en orden alfabético
+#   self.rutas      TablaHash  ruta -> lista de estaciones en orden
+#   self.rutas_de   TablaHash  estación -> lista de rutas que paran ahí
+#   self.horarios   TablaHash  "ruta|estación" -> lista ordenada de horas "HH:MM"
+#   self.buses      TablaHash  estación -> cuántos buses paran ahí al día
+#   self.deshacer_lista / self.rehacer_lista   pilas de cambios
 
 import csv
 
-from .tabla_hash import TablaHash
-from .avl import ArbolAVL
-from .lineales import Pila, ListaDoble, NodoParada
-from .algoritmos import (ordenar, primer_mayor_o_igual, a_minutos, a_texto,
-                         normalizar)
+from .estructuras import TablaHash, ordenar, buscar_desde
 
 
-class Estacion:
-    def __init__(self, nombre):
-        self.nombre = nombre
-        self.abierta = True
-        self.rutas = TablaHash(4)   # rutas que paran aquí: ruta -> True
-        self.buses = 0              # buses al día que paran aquí (para R6)
+def limpiar(nombre):
+    """Quita espacios de los lados y pasa a mayúsculas: ' calle 26' -> 'CALLE 26'."""
+    if nombre is None:
+        return None
+    return nombre.strip().upper()
 
 
-class Ruta:
-    def __init__(self, nombre):
-        self.nombre = nombre
-        self.paradas = ListaDoble()  # recorrido en orden
-        self.nodos = TablaHash(8)    # estacion -> NodoParada
+def hora_bonita(hora):
+    """'7:5' -> '07:05'. Con dos dígitos, las horas se pueden comparar como texto."""
+    partes = hora.strip().split(":")
+    return f"{int(partes[0]):02d}:{int(partes[1]):02d}"
 
 
-def _clave_horario(ruta, estacion):
-    return ruta + "|" + estacion
-
-
-def _archivo(carpeta, nombre):
-    # Se arma la ruta a mano porque os no está en los módulos permitidos.
-    if carpeta.endswith("/") or carpeta.endswith("\\"):
-        return carpeta + nombre
-    return carpeta + "/" + nombre
-
-
-def _leer_csv(ruta_archivo):
-    """Devuelve las filas del CSV sin el encabezado, como listas de texto."""
+def leer_csv(archivo):
+    """Devuelve las filas del archivo, sin la fila de títulos."""
     filas = []
-    with open(ruta_archivo, encoding="utf-8-sig", newline="") as f:
+    with open(archivo, encoding="utf-8-sig") as f:
         lector = csv.reader(f)
-        primera = True
+        next(lector)  # saltar los títulos
         for fila in lector:
-            if primera:
-                primera = False
-                continue
             if len(fila) > 0:
                 filas.append(fila)
     return filas
 
 
-def _menor_por_orden(a, b):
+def esta_en(lista, valor):
+    """Reemplaza a 'valor in lista' (prohibido): recorre la lista."""
+    for x in lista:
+        if x == valor:
+            return True
+    return False
+
+
+def posicion_de(lista, valor):
+    """Reemplaza a lista.index(valor) (prohibido). Devuelve -1 si no está."""
+    for i in range(len(lista)):
+        if lista[i] == valor:
+            return i
+    return -1
+
+
+def insertar_en(lista, posicion, valor):
+    """Mete valor en la posición, corriendo los demás una casilla a la derecha."""
+    lista.append(None)
+    i = len(lista) - 1
+    while i > posicion:
+        lista[i] = lista[i - 1]
+        i -= 1
+    lista[posicion] = valor
+
+
+def borrar_en(lista, posicion):
+    """Saca el elemento de la posición, corriendo los demás a la izquierda."""
+    for i in range(posicion, len(lista) - 1):
+        lista[i] = lista[i + 1]
+    lista.pop()
+
+
+def primero_por_orden(a, b):
     return a[0] < b[0]
 
 
-def _menor_ranking(a, b):
-    # Más buses primero; si empatan, alfabético.
+def primero_en_ranking(a, b):
+    # Más buses va primero. Si empatan, en orden alfabético.
     if a[1] != b[1]:
         return a[1] > b[1]
     return a[0] < b[0]
 
 
 class Red:
-    # ------------------------------------------------------------------
-    # Carga
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------
+    # Cargar los tres CSV
+    # -----------------------------------------------------------
     def __init__(self, carpeta):
-        """Lee estaciones.csv, rutas.csv y horarios.csv de la carpeta.
+        self.abierta = TablaHash()
+        self.rutas = TablaHash()
+        self.rutas_de = TablaHash()
+        self.horarios = TablaHash()
+        self.buses = TablaHash()
+        self.deshacer_lista = []
+        self.rehacer_lista = []
+        self.ranking_guardado = None  # None = hay que volver a calcularlo
 
-        O(E + P log P + H log H): E estaciones, P paradas, H horarios.
-        """
-        self._estaciones = TablaHash(1024)
-        self._abiertas = ArbolAVL()
-        self._rutas = TablaHash(256)
-        self._horarios = TablaHash(4096)
-        self._ranking = None
-        self._pila_deshacer = Pila()
-        self._pila_rehacer = Pila()
+        # Estaciones
+        nombres = []
+        for fila in leer_csv(carpeta + "/estaciones.csv"):
+            nombre = limpiar(fila[0])
+            if self.abierta.obtener(nombre) is None:
+                self.abierta.poner(nombre, True)
+                self.rutas_de.poner(nombre, [])
+                self.buses.poner(nombre, 0)
+                nombres.append(nombre)
+        self.nombres = ordenar(nombres)
 
-        for fila in _leer_csv(_archivo(carpeta, "estaciones.csv")):
-            self._crear_estacion(normalizar(fila[0]))
+        # Rutas: juntamos las filas de cada ruta y las ordenamos por "orden".
+        filas_por_ruta = TablaHash()
+        for fila in leer_csv(carpeta + "/rutas.csv"):
+            ruta = fila[0].strip()
+            if filas_por_ruta.obtener(ruta) is None:
+                filas_por_ruta.poner(ruta, [])
+            filas_por_ruta.obtener(ruta).append((int(fila[1]), limpiar(fila[2])))
+        for ruta, filas in filas_por_ruta.pares():
+            paradas = []
+            for orden, estacion in ordenar(filas, primero_por_orden):
+                paradas.append(estacion)
+                self.rutas_de.obtener(estacion).append(ruta)
+            self.rutas.poner(ruta, paradas)
 
-        # rutas.csv: agrupar por ruta y ordenar cada grupo por "orden".
-        grupos = TablaHash(256)
-        for fila in _leer_csv(_archivo(carpeta, "rutas.csv")):
-            nombre_ruta = fila[0].strip()
-            grupo = grupos.obtener(nombre_ruta)
-            if grupo is None:
-                grupo = []
-                grupos.poner(nombre_ruta, grupo)
-            grupo.append((int(fila[1]), normalizar(fila[2])))
-        for nombre_ruta, grupo in grupos.pares():
-            ruta = Ruta(nombre_ruta)
-            self._rutas.poner(nombre_ruta, ruta)
-            for orden, est in ordenar(grupo, _menor_por_orden):
-                if ruta.nodos.contiene(est):
-                    continue  # una ruta no repite estación
-                self._crear_estacion(est)
-                nodo = NodoParada(est)
-                ruta.paradas.agregar_al_final(nodo)
-                ruta.nodos.poner(est, nodo)
-                self._estaciones.obtener(est).rutas.poner(nombre_ruta, True)
+        # Horarios: una lista de horas por cada (ruta, estación), ordenada.
+        for fila in leer_csv(carpeta + "/horarios.csv"):
+            clave = fila[0].strip() + "|" + limpiar(fila[1])
+            if self.horarios.obtener(clave) is None:
+                self.horarios.poner(clave, [])
+            self.horarios.obtener(clave).append(hora_bonita(fila[2]))
+        for par in self.horarios.pares():
+            par[1] = ordenar(par[1])
 
-        # horarios.csv: una lista de minutos por (ruta, estación), ordenada.
-        for fila in _leer_csv(_archivo(carpeta, "horarios.csv")):
-            clave = _clave_horario(fila[0].strip(), normalizar(fila[1]))
-            lista = self._horarios.obtener(clave)
-            if lista is None:
-                lista = []
-                self._horarios.poner(clave, lista)
-            lista.append(a_minutos(fila[2]))
-        for clave, lista in self._horarios.pares():
-            self._horarios.poner(clave, ordenar(lista))
+        # Buses al día de cada estación (para el ranking).
+        for ruta, paradas in self.rutas.pares():
+            for estacion in paradas:
+                self._sumar_buses(ruta, estacion, 1)
 
-        # Buses por estación (para el ranking).
-        for nombre_ruta, ruta in self._rutas.pares():
-            nodo = ruta.paradas.cabeza
-            while nodo is not None:
-                est = self._estaciones.obtener(nodo.estacion)
-                est.buses += self._num_buses(nombre_ruta, nodo.estacion)
-                nodo = nodo.sig
+    def _sumar_buses(self, ruta, estacion, signo):
+        horas = self.horarios.obtener(ruta + "|" + estacion)
+        if horas is not None:
+            total = self.buses.obtener(estacion) + signo * len(horas)
+            self.buses.poner(estacion, total)
 
-    def _crear_estacion(self, nombre):
-        if nombre == "" or self._estaciones.contiene(nombre):
-            return
-        self._estaciones.poner(nombre, Estacion(nombre))
-        self._abiertas.insertar(nombre)
+    def _esta_abierta(self, nombre):
+        return self.abierta.obtener(nombre) is True
 
-    def _num_buses(self, ruta, estacion):
-        lista = self._horarios.obtener(_clave_horario(ruta, estacion))
-        return 0 if lista is None else len(lista)
-
-    def _abierta(self, nombre):
-        est = self._estaciones.obtener(nombre)
-        return est is not None and est.abierta
-
-    # ------------------------------------------------------------------
-    # R1 a R3: consultar estaciones
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------
+    # R1. ¿Existe la estación y está abierta?
+    # -----------------------------------------------------------
     def estado(self, nombre):
-        """R1. Devuelve (existe, abierta). O(L) promedio con la tabla hash."""
-        est = self._estaciones.obtener(normalizar(nombre))
-        if est is None:
+        """Devuelve (existe, abierta)."""
+        valor = self.abierta.obtener(limpiar(nombre))
+        if valor is None:
             return (False, False)
-        return (True, est.abierta)
+        return (True, valor)
 
+    # -----------------------------------------------------------
+    # R2. Autocompletar
+    # -----------------------------------------------------------
     def autocompletar(self, prefijo, k):
-        """R2. Hasta k estaciones abiertas que empiezan por prefijo, en orden.
+        """Hasta k estaciones abiertas que empiezan por prefijo, en orden."""
+        prefijo = limpiar(prefijo)
+        resultado = []
+        # Con búsqueda binaria saltamos al primer nombre >= prefijo.
+        i = buscar_desde(self.nombres, prefijo)
+        while i < len(self.nombres) and len(resultado) < k:
+            nombre = self.nombres[i]
+            if not nombre.startswith(prefijo):
+                break  # ya pasamos todos los que empiezan así
+            if self._esta_abierta(nombre):
+                resultado.append(nombre)
+            i += 1
+        return resultado
 
-        O(log n + k) con el árbol AVL de estaciones abiertas.
-        """
-        if k <= 0:
-            return []
-        prefijo = normalizar(prefijo)
-
-        def empieza(nombre):
-            return nombre.startswith(prefijo)
-
-        return self._abiertas.desde(prefijo, empieza, k)
-
+    # -----------------------------------------------------------
+    # R3. Rango de nombres
+    # -----------------------------------------------------------
     def rango(self, desde, hasta):
-        """R3. Estaciones abiertas con desde <= nombre <= hasta, en orden.
+        """Estaciones abiertas entre desde y hasta (incluidas), en orden."""
+        desde = limpiar(desde)
+        hasta = limpiar(hasta)
+        resultado = []
+        i = buscar_desde(self.nombres, desde)
+        while i < len(self.nombres) and self.nombres[i] <= hasta:
+            if self._esta_abierta(self.nombres[i]):
+                resultado.append(self.nombres[i])
+            i += 1
+        return resultado
 
-        O(log n + m), m = estaciones devueltas.
-        """
-        desde = normalizar(desde)
-        hasta = normalizar(hasta)
-
-        def no_pasa(nombre):
-            return nombre <= hasta
-
-        return self._abiertas.desde(desde, no_pasa)
-
-    # ------------------------------------------------------------------
-    # R4: próximo bus
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------
+    # R4. Próximo bus
+    # -----------------------------------------------------------
     def proximo_bus(self, estacion, ruta, hora):
-        """R4. Hora 'HH:MM' del primer bus de la ruta en esa estación a partir
-        de hora (incluida). None si la estación está cerrada, si la ruta no
-        para ahí o si ya no pasan más buses ese día.
-
-        O(L + log h), h = buses de esa ruta en esa estación (búsqueda binaria).
-        """
-        estacion = normalizar(estacion)
-        r = self._rutas.obtener(ruta)
-        if r is None or not r.nodos.contiene(estacion):
+        """Hora 'HH:MM' del siguiente bus (a esa hora o después), o None."""
+        estacion = limpiar(estacion)
+        paradas = self.rutas.obtener(ruta)
+        if paradas is None or not esta_en(paradas, estacion):
             return None
-        if not self._abierta(estacion):
+        if not self._esta_abierta(estacion):
             return None
-        horas = self._horarios.obtener(_clave_horario(ruta, estacion))
+        horas = self.horarios.obtener(ruta + "|" + estacion)
         if horas is None:
             return None
-        i = primer_mayor_o_igual(horas, a_minutos(hora))
+        i = buscar_desde(horas, hora_bonita(hora))
         if i == len(horas):
-            return None
-        return a_texto(horas[i])
+            return None  # ya no pasan más buses hoy
+        return horas[i]
 
-    # ------------------------------------------------------------------
-    # R5: planear un viaje
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------
+    # R5. Planear un viaje (directo o con un transbordo)
+    # -----------------------------------------------------------
     def viaje(self, origen, destino):
-        """R5. Viaje directo o con un transbordo que pase por menos paradas.
+        """Lista de tramos (ruta, sube_en, baja_en, paradas).
 
-        Devuelve una lista de tramos (ruta, sube_en, baja_en, paradas), [] si
-        origen == destino, o None si no hay viaje. A igual número de paradas
-        se prefiere el viaje directo.
-
-        Idea: 1) desde el origen, avanzar por cada ruta que pasa por él y
-        anotar en una tabla hash la menor distancia a cada estación alcanzable
-        (si una es el destino, es un viaje directo). 2) desde el destino,
-        retroceder por cada ruta que pasa por él; cada estación abierta que
-        también se alcanzó en el paso 1 es un posible transbordo.
-        O(suma de largos de las rutas que pasan por origen y destino).
+        [] si origen y destino son la misma estación, None si no hay viaje.
         """
-        origen = normalizar(origen)
-        destino = normalizar(destino)
-        if not self._abierta(origen) or not self._abierta(destino):
+        origen = limpiar(origen)
+        destino = limpiar(destino)
+        if not self._esta_abierta(origen) or not self._esta_abierta(destino):
             return None
         if origen == destino:
             return []
 
-        mejor = None          # lista de tramos de la mejor respuesta
-        mejor_paradas = -1
-        alcanzadas = TablaHash(64)  # estacion -> (paradas, ruta)
+        mejor = None
+        mejor_total = 0
 
-        for nombre_ruta in self._estaciones.obtener(origen).rutas.claves():
-            ruta = self._rutas.obtener(nombre_ruta)
-            nodo = ruta.nodos.obtener(origen).sig
-            paradas = 1
-            while nodo is not None:
-                est = nodo.estacion
-                if est == destino:
-                    if mejor is None or paradas < mejor_paradas:
-                        mejor = [(nombre_ruta, origen, destino, paradas)]
-                        mejor_paradas = paradas
-                    break  # más allá del destino no sirve en esta ruta
-                previo = alcanzadas.obtener(est)
-                if previo is None or paradas < previo[0]:
-                    alcanzadas.poner(est, (paradas, nombre_ruta))
-                nodo = nodo.sig
-                paradas += 1
+        # Paso 1: desde el origen, avanzar por cada ruta que pasa por ahí.
+        # "alcanzadas" guarda, para cada estación, (paradas, ruta) del
+        # camino más corto que encontramos para llegar a ella.
+        alcanzadas = TablaHash()
+        for ruta in self.rutas_de.obtener(origen):
+            paradas = self.rutas.obtener(ruta)
+            i = posicion_de(paradas, origen)
+            for j in range(i + 1, len(paradas)):
+                estacion = paradas[j]
+                cuantas = j - i
+                if estacion == destino:
+                    if mejor is None or cuantas < mejor_total:
+                        mejor = [(ruta, origen, destino, cuantas)]
+                        mejor_total = cuantas
+                    break
+                antes = alcanzadas.obtener(estacion)
+                if antes is None or cuantas < antes[0]:
+                    alcanzadas.poner(estacion, (cuantas, ruta))
 
-        for nombre_ruta in self._estaciones.obtener(destino).rutas.claves():
-            ruta = self._rutas.obtener(nombre_ruta)
-            nodo = ruta.nodos.obtener(destino).ant
-            paradas2 = 1
-            while nodo is not None:
-                t = nodo.estacion
-                if t == origen:
-                    break  # eso ya sería el viaje directo en esta ruta
-                llegada = alcanzadas.obtener(t)
-                if (llegada is not None and llegada[1] != nombre_ruta
-                        and self._abierta(t)):
-                    total = llegada[0] + paradas2
-                    if mejor is None or total < mejor_paradas:
-                        mejor = [(llegada[1], origen, t, llegada[0]),
-                                 (nombre_ruta, t, destino, paradas2)]
-                        mejor_paradas = total
-                nodo = nodo.ant
-                paradas2 += 1
-
+        # Paso 2: desde el destino, retroceder por cada ruta que llega ahí.
+        # Si una estación también se alcanzó en el paso 1, se puede
+        # transbordar en ella (si está abierta y es otra ruta).
+        for ruta in self.rutas_de.obtener(destino):
+            paradas = self.rutas.obtener(ruta)
+            s = posicion_de(paradas, destino)
+            for q in range(s - 1, -1, -1):
+                cambio = paradas[q]
+                if cambio == origen:
+                    break
+                llegada = alcanzadas.obtener(cambio)
+                if llegada is None or llegada[1] == ruta:
+                    continue
+                if not self._esta_abierta(cambio):
+                    continue
+                total = llegada[0] + (s - q)
+                if mejor is None or total < mejor_total:
+                    mejor = [(llegada[1], origen, cambio, llegada[0]),
+                             (ruta, cambio, destino, s - q)]
+                    mejor_total = total
         return mejor
 
-    # ------------------------------------------------------------------
-    # R6: ranking
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------
+    # R6. Ranking de estaciones con más buses
+    # -----------------------------------------------------------
     def ranking(self, k):
-        """R6. Las k estaciones abiertas con más buses al día: [(nombre, buses)].
+        """Las k estaciones abiertas con más buses al día: [(nombre, buses)]."""
+        # Solo se vuelve a ordenar si algo cambió desde la última vez.
+        if self.ranking_guardado is None:
+            lista = []
+            for nombre, buses in self.buses.pares():
+                if self._esta_abierta(nombre):
+                    lista.append((nombre, buses))
+            self.ranking_guardado = ordenar(lista, primero_en_ranking)
+        return self.ranking_guardado[:k]
 
-        La lista ordenada se guarda y solo se recalcula (merge sort,
-        O(n log n)) cuando hubo un cierre, reapertura o edición. Si nada
-        cambió, la consulta es O(k).
-        """
-        if self._ranking is None:
-            pares = []
-            for nombre, est in self._estaciones.pares():
-                if est.abierta:
-                    pares.append((nombre, est.buses))
-            self._ranking = ordenar(pares, _menor_ranking)
-        if k <= 0:
-            return []
-        return self._ranking[:k]
-
-    # ------------------------------------------------------------------
-    # R7: editar rutas
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------
+    # R7. Editar rutas
+    # -----------------------------------------------------------
     def agregar_parada(self, ruta, nueva, despues_de):
-        """R7. Pone la estación nueva justo después de despues_de en la ruta.
-
-        despues_de=None la pone al inicio. Devuelve True si se pudo.
-        O(L) promedio: tabla hash para hallar el nodo + inserción en O(1).
-        """
-        nueva = normalizar(nueva)
-        if despues_de is not None:
-            despues_de = normalizar(despues_de)
+        """Pone 'nueva' justo después de 'despues_de' (None = al inicio)."""
+        nueva = limpiar(nueva)
+        despues_de = limpiar(despues_de)
         if not self._agregar(ruta, nueva, despues_de):
             return False
-        self._registrar(("agregar", ruta, nueva, despues_de))
+        self._guardar_cambio(("agregar", ruta, nueva, despues_de))
         return True
 
     def quitar_parada(self, ruta, estacion):
-        """R7. Quita la parada de la ruta. Devuelve True si se pudo. O(L)."""
-        estacion = normalizar(estacion)
-        r = self._rutas.obtener(ruta)
-        if r is None:
+        estacion = limpiar(estacion)
+        paradas = self.rutas.obtener(ruta)
+        if paradas is None:
             return False
-        nodo = r.nodos.obtener(estacion)
-        if nodo is None:
+        i = posicion_de(paradas, estacion)
+        if i == -1:
             return False
-        previo = None if nodo.ant is None else nodo.ant.estacion
+        anterior = None
+        if i > 0:
+            anterior = paradas[i - 1]
         self._quitar(ruta, estacion)
-        self._registrar(("quitar", ruta, estacion, previo))
+        # Guardamos la anterior para poder deshacer y dejarla donde estaba.
+        self._guardar_cambio(("quitar", ruta, estacion, anterior))
         return True
 
     def recorrido(self, ruta, al_reves=False):
-        """R7. Lista de estaciones de la ruta, en un sentido o en el otro.
-
-        [] si la ruta no existe. O(P), P = paradas de la ruta.
-        """
-        r = self._rutas.obtener(ruta)
-        if r is None:
+        paradas = self.rutas.obtener(ruta)
+        if paradas is None:
             return []
-        return r.paradas.a_lista(al_reves)
+        if al_reves:
+            return paradas[::-1]
+        return paradas[:]
 
     def _agregar(self, ruta, nueva, despues_de):
-        r = self._rutas.obtener(ruta)
-        est = self._estaciones.obtener(nueva)
-        if r is None or est is None or r.nodos.contiene(nueva):
+        paradas = self.rutas.obtener(ruta)
+        if paradas is None or self.abierta.obtener(nueva) is None:
             return False
-        previo = None
-        if despues_de is not None:
-            previo = r.nodos.obtener(despues_de)
-            if previo is None:
+        if esta_en(paradas, nueva):
+            return False
+        if despues_de is None:
+            posicion = 0
+        else:
+            i = posicion_de(paradas, despues_de)
+            if i == -1:
                 return False
-        nodo = NodoParada(nueva)
-        r.paradas.insertar_despues(previo, nodo)
-        r.nodos.poner(nueva, nodo)
-        est.rutas.poner(ruta, True)
-        est.buses += self._num_buses(ruta, nueva)
-        self._ranking = None
+            posicion = i + 1
+        insertar_en(paradas, posicion, nueva)
+        self.rutas_de.obtener(nueva).append(ruta)
+        self._sumar_buses(ruta, nueva, 1)
+        self.ranking_guardado = None
         return True
 
     def _quitar(self, ruta, estacion):
-        r = self._rutas.obtener(ruta)
-        nodo = r.nodos.obtener(estacion)
-        r.paradas.quitar(nodo)
-        r.nodos.quitar(estacion)
-        est = self._estaciones.obtener(estacion)
-        est.rutas.quitar(ruta)
-        est.buses -= self._num_buses(ruta, estacion)
-        self._ranking = None
+        paradas = self.rutas.obtener(ruta)
+        borrar_en(paradas, posicion_de(paradas, estacion))
+        rutas = self.rutas_de.obtener(estacion)
+        borrar_en(rutas, posicion_de(rutas, ruta))
+        self._sumar_buses(ruta, estacion, -1)
+        self.ranking_guardado = None
 
-    # ------------------------------------------------------------------
-    # R8: cerrar y reabrir
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------
+    # R8. Cerrar y reabrir
+    # -----------------------------------------------------------
     def cerrar(self, nombre):
-        """R8. Cierra la estación. False si no existe o ya estaba cerrada.
-
-        O(L + log n): tabla hash + quitarla del AVL de abiertas.
-        """
-        nombre = normalizar(nombre)
-        est = self._estaciones.obtener(nombre)
-        if est is None or not est.abierta:
-            return False
-        self._cerrar(nombre)
-        self._registrar(("cerrar", nombre))
+        nombre = limpiar(nombre)
+        if self.abierta.obtener(nombre) is not True:
+            return False  # no existe o ya estaba cerrada
+        self._poner_abierta(nombre, False)
+        self._guardar_cambio(("cerrar", nombre))
         return True
 
     def reabrir(self, nombre):
-        """R8. Reabre la estación. False si no existe o ya estaba abierta."""
-        nombre = normalizar(nombre)
-        est = self._estaciones.obtener(nombre)
-        if est is None or est.abierta:
-            return False
-        self._reabrir(nombre)
-        self._registrar(("reabrir", nombre))
+        nombre = limpiar(nombre)
+        if self.abierta.obtener(nombre) is not False:
+            return False  # no existe o ya estaba abierta
+        self._poner_abierta(nombre, True)
+        self._guardar_cambio(("reabrir", nombre))
         return True
 
-    def _cerrar(self, nombre):
-        self._estaciones.obtener(nombre).abierta = False
-        self._abiertas.eliminar(nombre)
-        self._ranking = None
+    def _poner_abierta(self, nombre, valor):
+        self.abierta.poner(nombre, valor)
+        self.ranking_guardado = None
 
-    def _reabrir(self, nombre):
-        self._estaciones.obtener(nombre).abierta = True
-        self._abiertas.insertar(nombre)
-        self._ranking = None
-
-    # ------------------------------------------------------------------
-    # R9: deshacer y rehacer
-    # ------------------------------------------------------------------
-    def _registrar(self, cambio):
-        """Todo cambio nuevo va a la pila de deshacer y borra lo de rehacer."""
-        self._pila_deshacer.apilar(cambio)
-        self._pila_rehacer.vaciar()
+    # -----------------------------------------------------------
+    # R9. Deshacer y rehacer (dos pilas)
+    # -----------------------------------------------------------
+    def _guardar_cambio(self, cambio):
+        self.deshacer_lista.append(cambio)
+        self.rehacer_lista = []  # un cambio nuevo borra lo que había para rehacer
 
     def deshacer(self):
-        """R9. Deshace el último cambio. False si no hay nada. O(L + log n)."""
-        if self._pila_deshacer.vacia():
+        if len(self.deshacer_lista) == 0:
             return False
-        cambio = self._pila_deshacer.desapilar()
-        tipo = cambio[0]
-        if tipo == "cerrar":
-            self._reabrir(cambio[1])
-        elif tipo == "reabrir":
-            self._cerrar(cambio[1])
-        elif tipo == "agregar":
-            self._quitar(cambio[1], cambio[2])
-        elif tipo == "quitar":
-            self._agregar(cambio[1], cambio[2], cambio[3])
-        self._pila_rehacer.apilar(cambio)
+        cambio = self.deshacer_lista.pop()
+        self._aplicar(cambio, al_contrario=True)
+        self.rehacer_lista.append(cambio)
         return True
 
     def rehacer(self):
-        """R9. Vuelve a aplicar el último cambio deshecho. False si no hay."""
-        if self._pila_rehacer.vacia():
+        if len(self.rehacer_lista) == 0:
             return False
-        cambio = self._pila_rehacer.desapilar()
-        tipo = cambio[0]
-        if tipo == "cerrar":
-            self._cerrar(cambio[1])
-        elif tipo == "reabrir":
-            self._reabrir(cambio[1])
-        elif tipo == "agregar":
-            self._agregar(cambio[1], cambio[2], cambio[3])
-        elif tipo == "quitar":
-            self._quitar(cambio[1], cambio[2])
-        self._pila_deshacer.apilar(cambio)
+        cambio = self.rehacer_lista.pop()
+        self._aplicar(cambio, al_contrario=False)
+        self.deshacer_lista.append(cambio)
         return True
 
-    # ------------------------------------------------------------------
-    # Ayudas para la app (no son parte del contrato)
-    # ------------------------------------------------------------------
-    def nombres_rutas(self):
-        return ordenar(self._rutas.claves())
+    def _aplicar(self, cambio, al_contrario):
+        """Aplica un cambio guardado. Si al_contrario es True, hace lo opuesto."""
+        tipo = cambio[0]
+        if tipo == "cerrar":
+            # deshacer un cierre = reabrir; rehacerlo = cerrar
+            self._poner_abierta(cambio[1], al_contrario)
+        elif tipo == "reabrir":
+            self._poner_abierta(cambio[1], not al_contrario)
+        elif tipo == "agregar":
+            ruta, estacion, despues_de = cambio[1], cambio[2], cambio[3]
+            if al_contrario:
+                self._quitar(ruta, estacion)
+            else:
+                self._agregar(ruta, estacion, despues_de)
+        elif tipo == "quitar":
+            ruta, estacion, anterior = cambio[1], cambio[2], cambio[3]
+            if al_contrario:
+                self._agregar(ruta, estacion, anterior)
+            else:
+                self._quitar(ruta, estacion)
 
-    def rutas_de(self, estacion):
-        est = self._estaciones.obtener(normalizar(estacion))
-        if est is None:
-            return []
-        return ordenar(est.rutas.claves())
 
-    def total_estaciones(self):
-        return len(self._estaciones)
+# ---------------------------------------------------------------
+# R10. Fila de abordaje
+# ---------------------------------------------------------------
+def simular_fila(llegadas, frecuencia, capacidad):
+    """Los buses salen en el minuto 0, frecuencia, 2*frecuencia, ...
+
+    llegadas: minuto en que llega cada pasajero.
+    Devuelve una lista con el minuto en que salió el bus de cada pasajero
+    (en orden de llegada). El que llega justo cuando sale el bus, alcanza.
+    """
+    # Si las llegadas no vienen en orden, las ordenamos primero.
+    for i in range(1, len(llegadas)):
+        if llegadas[i] < llegadas[i - 1]:
+            llegadas = ordenar(llegadas)
+            break
+    n = len(llegadas)
+    salida = [0] * n
+
+    # La fila es una lista y "frente" dice quién es el primero.
+    # (No usamos fila.pop(0) porque corre a todos y sería muy lento.)
+    fila = []
+    frente = 0
+    siguiente = 0  # siguiente pasajero que todavía no ha llegado
+    bus = 0
+
+    while siguiente < n or frente < len(fila):
+        # Si no hay nadie esperando, saltamos al primer bus que sirve.
+        if frente == len(fila) and llegadas[siguiente] > bus:
+            bus = (llegadas[siguiente] + frecuencia - 1) // frecuencia * frecuencia
+        # Entran a la fila los que llegan antes de que salga el bus.
+        while siguiente < n and llegadas[siguiente] <= bus:
+            fila.append(siguiente)
+            siguiente += 1
+        # Suben en orden de llegada hasta llenar el bus.
+        subidos = 0
+        while subidos < capacidad and frente < len(fila):
+            salida[fila[frente]] = bus
+            frente += 1
+            subidos += 1
+        bus += frecuencia
+    return salida
