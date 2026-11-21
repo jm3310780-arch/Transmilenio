@@ -6,10 +6,12 @@ con la red real de TransMilenio.
 
 ## Cómo arrancar la app
 
-Comando único, desde la carpeta del proyecto:
+Resumen: desde la carpeta del proyecto, se instalan las librerías una vez y
+la app arranca con un solo comando.
 
 ```bash
-pip install -r requirements.txt && streamlit run app/app.py
+pip install -r requirements.txt
+streamlit run app/app.py
 ```
 
 ### Paso a paso
