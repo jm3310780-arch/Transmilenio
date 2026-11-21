@@ -76,8 +76,8 @@ Casos borde que decidimos:
   Con `despues_de=None` la pone al inicio.
 - `ranking(k)` con k ≤ 0 devuelve `[]`; si hay menos de k abiertas,
   devuelve todas.
-- `simular_fila`: los buses salen en los segundos 0, f, 2f, 3f… (múltiplos
-  de la frecuencia). Quien llega justo cuando sale un bus alcanza a subir.
+- `simular_fila`: como dice el enunciado, los buses salen en los segundos
+  f, 2f, 3f… (f = frecuencia; no hay bus en el segundo 0). Quien llega justo cuando sale un bus alcanza a subir.
   Si dos llegan en el mismo segundo, sube primero el que va antes en la
   lista. Ejemplo del enunciado:
   `simular_fila([30, 5, 5, 70], 60, 2)` → `[120, 60, 60, 120]`.

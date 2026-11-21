@@ -484,11 +484,10 @@ class Red:
 # ---------------------------------------------------------------
 # R10. Fila de abordaje
 # ---------------------------------------------------------------
-# Los buses salen en los segundos 0, frecuencia, 2*frecuencia, ... (los
-# múltiplos de la frecuencia). Quien llega justo cuando sale un bus alcanza
+# Los buses salen en los segundos frecuencia, 2*frecuencia, 3*frecuencia, ...
+# (el primero sale en el segundo "frecuencia", no en el 0). Quien llega justo cuando sale un bus alcanza
 # a subir. Si el bus se llena, los demás esperan el siguiente, en orden de
 # llegada (si llegan en el mismo segundo, primero el que va antes en la lista).
-PRIMER_BUS = 0
 
 
 def simular_fila(llegadas, frecuencia, capacidad):
@@ -533,7 +532,7 @@ def simular_fila(llegadas, frecuencia, capacidad):
     fila = []
     frente = 0
     siguiente = 0  # siguiente persona (en orden de llegada) que no ha llegado
-    bus = PRIMER_BUS
+    bus = frecuencia  # el primer bus sale en el segundo 'frecuencia'
     while siguiente < p or frente < len(fila):
         # Si no hay nadie esperando, saltamos al primer bus que le sirve
         # al siguiente que llega (no simulamos buses vacíos).

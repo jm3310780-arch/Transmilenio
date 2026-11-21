@@ -115,7 +115,8 @@ assert red.rehacer() is False
 
 # R10
 assert simular_fila([30, 5, 5, 70], 60, 2) == [120, 60, 60, 120]  # ejemplo del enunciado
-assert simular_fila([0, 0, 1, 2, 3, 10, 11], 5, 2) == [0, 0, 5, 5, 10, 10, 15]
+assert simular_fila([0, 0, 1, 2, 3, 10, 11], 5, 2) == [5, 5, 10, 10, 15, 15, 20]  # no hay bus en el 0
+assert simular_fila([5, 6], 5, 1) == [5, 10]   # llegar justo cuando sale: alcanza
 assert simular_fila([], 5, 2) == []
 assert simular_fila([7, 1], 5, 10) == [10, 5]       # se devuelve en el orden de entrada
 assert simular_fila([3, 3, 3], 5, 1) == [5, 10, 15]  # empate: primero el que va antes
