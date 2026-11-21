@@ -1,18 +1,11 @@
 # Integrantes
 
-Grupo de 3 o 4 personas. De esta tabla sale sobre qué requisito sustenta cada
-persona (en la sustentación cada uno responde sobre un requisito que **no** hizo).
+De esta tabla sale sobre qué requisito sustenta cada persona (en la
+sustentación cada uno responde sobre un requisito que **no** hizo).
 
 | Integrante | Requisitos que hizo |
 | --- | --- |
-| Jose | |
-| (nombre) | |
-| (nombre) | |
-| (nombre) | |
-
-Reparto sugerido (cambiarlo por el real):
-
-- R1, R2, R3 y carga de la red (tabla hash, lista ordenada, búsqueda binaria).
-- R4 y R5 (próximo bus y planear viaje) + `convertir_gtfs.py`.
-- R6, R7, R8 y R9 (ranking con montículo, rutas, cierres, deshacer/rehacer).
-- R10, R11 y el front (fila, panel de rendimiento, `app.py`).
+| **José** | Carga de la red, R1 (buscar estación), R2 (autocompletar), R3 (rango), estructuras base (tabla hash, merge sort, búsqueda binaria) y script de conversión del GTFS. |
+| **Santiago Serrano** | R5 (planear viaje directo o con un transbordo) y R12 (README de decisiones). |
+| **Duham** | R7 (editar rutas), R8 (cerrar y reabrir), R9 (deshacer y rehacer), R10 (fila de abordaje), R11 (panel de rendimiento) y el front (`app.py`). |
+| **Santiago Wagner** | R4 (próximo bus) y R6 (ranking con montículo indexado). |
