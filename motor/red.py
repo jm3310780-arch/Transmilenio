@@ -244,7 +244,7 @@ class Red:
         return resultado
 
     # -----------------------------------------------------------
-    # R4. Próximo bus (Santiago Wagner)   O(log h)
+    # R4. Próximo bus (Santiago Velásquez)   O(log h)
     # -----------------------------------------------------------
     def proximo_bus(self, estacion, ruta, hora):
         """Hora 'HH:MM' del siguiente bus (a esa hora o después), o None."""
@@ -328,7 +328,7 @@ class Red:
         return mejor
 
     # -----------------------------------------------------------
-    # R6. Ranking de estaciones con más buses (Santiago Wagner)
+    # R6. Ranking de estaciones con más buses (Santiago Velásquez)
     #     O((k + c) log(k + c))
     # -----------------------------------------------------------
     def ranking(self, k):
@@ -338,7 +338,7 @@ class Red:
         return self.ranking_m.mejores(k, self._esta_abierta)
 
     # -----------------------------------------------------------
-    # R7. Editar rutas (Santiago Velásquez)   O(P)
+    # R7. Editar rutas (Santiago Wagner)   O(P)
     # -----------------------------------------------------------
     def agregar_parada(self, ruta, nueva, despues_de):
         """Pone 'nueva' justo después de 'despues_de' (None = al inicio)."""
@@ -419,7 +419,7 @@ class Red:
             self.ranking_m.cambiar(estacion, actual + cuantos)  # O(log n)
 
     # -----------------------------------------------------------
-    # R8. Cerrar y reabrir (Santiago Velásquez)   O(1)
+    # R8. Cerrar y reabrir (Santiago Wagner)   O(1)
     # -----------------------------------------------------------
     def cerrar(self, nombre):
         nombre = limpiar(nombre)
@@ -438,7 +438,7 @@ class Red:
         return True
 
     # -----------------------------------------------------------
-    # R9. Deshacer y rehacer con dos pilas (Santiago Velásquez)
+    # R9. Deshacer y rehacer con dos pilas (Santiago Wagner)
     # -----------------------------------------------------------
     def _guardar_cambio(self, cambio):
         self.pila_deshacer.append(cambio)
@@ -483,7 +483,7 @@ class Red:
 
 
 # ---------------------------------------------------------------
-# R10. Fila de abordaje (Santiago Velásquez)
+# R10. Fila de abordaje (Santiago Wagner)
 # ---------------------------------------------------------------
 # Los buses salen en los segundos frecuencia, 2*frecuencia, 3*frecuencia, ...
 # (el primero sale en el segundo "frecuencia", no en el 0). Quien llega justo cuando sale un bus alcanza
