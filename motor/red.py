@@ -107,7 +107,7 @@ def primero_en_ranking(a, b):
 
 class Red:
     # -----------------------------------------------------------
-    # Cargar los tres CSV
+    # Cargar los tres CSV (José)
     # -----------------------------------------------------------
     def __init__(self, carpeta):
         carpeta = str(carpeta).rstrip("/\\")
@@ -193,7 +193,7 @@ class Red:
         return self.abierta.obtener(nombre) is True
 
     # -----------------------------------------------------------
-    # R1. ¿Existe la estación y está abierta?   O(1) promedio
+    # R1. ¿Existe la estación y está abierta? (José)   O(1) promedio
     # -----------------------------------------------------------
     def estado(self, nombre):
         """'ABIERTA', 'CERRADA' o 'NO EXISTE'."""
@@ -205,7 +205,7 @@ class Red:
         return CERRADA
 
     # -----------------------------------------------------------
-    # R2. Autocompletar   O(log n + k)
+    # R2. Autocompletar (José)   O(log n + k)
     # -----------------------------------------------------------
     def autocompletar(self, prefijo, k):
         """Hasta k estaciones abiertas que empiezan por prefijo, en orden."""
@@ -226,7 +226,7 @@ class Red:
         return resultado
 
     # -----------------------------------------------------------
-    # R3. Rango de nombres   O(log n + m)
+    # R3. Rango de nombres (José)   O(log n + m)
     # -----------------------------------------------------------
     def rango(self, desde, hasta):
         """Estaciones abiertas entre desde y hasta (incluidas), en orden."""
@@ -244,7 +244,7 @@ class Red:
         return resultado
 
     # -----------------------------------------------------------
-    # R4. Próximo bus   O(log h)
+    # R4. Próximo bus (Santiago Wagner)   O(log h)
     # -----------------------------------------------------------
     def proximo_bus(self, estacion, ruta, hora):
         """Hora 'HH:MM' del siguiente bus (a esa hora o después), o None."""
@@ -268,7 +268,7 @@ class Red:
         return horas[i]
 
     # -----------------------------------------------------------
-    # R5. Planear un viaje (directo o con un transbordo)
+    # R5. Planear un viaje, directo o con un transbordo (Santiago Serrano)
     # -----------------------------------------------------------
     def viaje(self, origen, destino):
         """Lista de tramos (ruta, sube_en, baja_en) con menos paradas.
@@ -328,7 +328,8 @@ class Red:
         return mejor
 
     # -----------------------------------------------------------
-    # R6. Ranking de estaciones con más buses   O((k + c) log(k + c))
+    # R6. Ranking de estaciones con más buses (Santiago Wagner)
+    #     O((k + c) log(k + c))
     # -----------------------------------------------------------
     def ranking(self, k):
         """Las k estaciones abiertas con más buses al día: [(nombre, buses)]."""
@@ -337,7 +338,7 @@ class Red:
         return self.ranking_m.mejores(k, self._esta_abierta)
 
     # -----------------------------------------------------------
-    # R7. Editar rutas   O(P)
+    # R7. Editar rutas (Santiago Velásquez)   O(P)
     # -----------------------------------------------------------
     def agregar_parada(self, ruta, nueva, despues_de):
         """Pone 'nueva' justo después de 'despues_de' (None = al inicio)."""
@@ -418,7 +419,7 @@ class Red:
             self.ranking_m.cambiar(estacion, actual + cuantos)  # O(log n)
 
     # -----------------------------------------------------------
-    # R8. Cerrar y reabrir   O(1)
+    # R8. Cerrar y reabrir (Santiago Velásquez)   O(1)
     # -----------------------------------------------------------
     def cerrar(self, nombre):
         nombre = limpiar(nombre)
@@ -437,7 +438,7 @@ class Red:
         return True
 
     # -----------------------------------------------------------
-    # R9. Deshacer y rehacer (dos pilas)
+    # R9. Deshacer y rehacer con dos pilas (Santiago Velásquez)
     # -----------------------------------------------------------
     def _guardar_cambio(self, cambio):
         self.pila_deshacer.append(cambio)
@@ -482,7 +483,7 @@ class Red:
 
 
 # ---------------------------------------------------------------
-# R10. Fila de abordaje
+# R10. Fila de abordaje (Santiago Velásquez)
 # ---------------------------------------------------------------
 # Los buses salen en los segundos frecuencia, 2*frecuencia, 3*frecuencia, ...
 # (el primero sale en el segundo "frecuencia", no en el 0). Quien llega justo cuando sale un bus alcanza
